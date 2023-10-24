@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+nimble build -d:release
+for file in bin/; do
+if [ -f "$file" ]; then
+sudo install -Dm755 bin/$file /usr/bin/$file
+fi
+done
