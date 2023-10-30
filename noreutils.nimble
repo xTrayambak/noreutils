@@ -13,3 +13,4 @@ bin           = @["noreutils"]
 requires "nim >= 1.6.14"
 requires "pretty"
 requires "nimAesCrypt"
+requires "jsony"
