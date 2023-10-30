@@ -1,4 +1,4 @@
-import std/[os, sysrand, sugar, sequtils, strutils, posix],
+import std/[os, sysrand, sequtils, strutils, posix],
        ../norecore/[
           argparse,
           coreutil,
@@ -45,10 +45,18 @@ proc shred*(target: string, shredPasses: uint) =
     var rand = newStringOfCap(dataLen + 8)
 
     rand &= urandom(dataLen + 2).toString()
+    
+    try:
+      writeFile(
+        target, rand
+      )
+    except IOError as exc:
+      echo "trash: critical: could not write random bytes to " & target & ": " & exc.msg
+      echo "trash: critical: this file can be easily recovered using simple tools. Good luck."
+    except OSError as exc:
+      echo "trash: critical: cannot write random bytes to " & target & ": " & exc.msg
+      echo "trash: critical: this file can be easily recovered using simple tools. Good luck."
 
-    writeFile(
-      target, rand
-    )
     discard dataLen
     discard rand
 
@@ -56,7 +64,8 @@ proc handle*(
   trash: Trash,
   target: string,
   recursive, safetyChecks, immediate, dontShred, dontAsk: bool,
-  encryptionKey: string, shredPasses: uint
+  encryptionKey: string, shredPasses: uint,
+  verbose: bool
 ) =
   var 
     fExist = fileExists target
@@ -82,6 +91,8 @@ proc handle*(
       writeFile(path, data)
 
       if encryptionKey.len > 0:
+        if verbose:
+          echo "trash: encrypting " & target & " using AES256 with buffer size set to 512"
         encryptFile(path, path, encryptionKey, 512)
 
       removeFile(target)
@@ -101,11 +112,12 @@ proc handle*(
       moveDir(target, path)
 
       for _, child in walkDir(target):
-        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, encryptionKey, shredPasses)
+        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, encryptionKey, shredPasses, verbose)
   else:
     if fExist:
-      echo "mv: Confirm that you want to delete: " & target & " [y/N]"
+      echo "trash: Confirm that you want to delete: " & target & " [y/N]"
       let answer = stdin.readLine().toLowerAscii()
+      
 
       if answer != "y":
         echo "mv: Won't delete " & target
@@ -129,22 +141,38 @@ proc handle*(
         removeFile(path)
       
       for _, child in walkDir(target):
-        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, encryptionKey, shredPasses)
+        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, encryptionKey, shredPasses, verbose)
 
       removeDir(target)
 
-proc recover*(trash: Trash, target: string) =
-  let path = getHomeDir() / TRASH_DIR / target
+proc recover*(trash: Trash, target: string, verbose: bool, encryptionKey: string = "", literal: bool = false) =
+  var path: string
+  
+  if not literal:
+    path = getHomeDir() / TRASH_DIR / target
+  else:
+    path = target
   
   var
     fExists = fileExists path
     dExists = dirExists path
 
   if not fExists and not dExists:
-    trash.error(target & ": No such file or directory")
+    trash.error(target & ": No such file or directory in trash records")
 
   if fExists:
-    moveFile(path, target)
+    if encryptionKey.len < 1:
+      moveFile(path, target)
+    else:
+      decryptFile(path, target, encryptionKey, 512)
+    
+    let contents = readFile(target)
+    if contents.startsWith("AES"):
+      # TODO: this is a bad way to detect an encrypted file.
+     echo("trash: It seems that this file is encrypted and you forgot to provide an encryption key. If you want, you can provide one right now: ")
+     decryptFile(path, target, stdin.readLine(), 512)
+
+    discard contents 
   elif dExists:
     if dirExists target:
       removeDir(target)
@@ -152,9 +180,13 @@ proc recover*(trash: Trash, target: string) =
     copyDir(path, target)
 
     for _, k in walkDir(path):
-      trash.recover(path.splitPath().tail / k.splitPath().tail)
+      if verbose:
+        echo "trash: recovering child of \"" & target & "\": " & path / k.splitPath().tail
+      trash.recover(path / k.splitPath().tail, verbose, encryptionKey, true)
 
     removeDir(path)
+
+  echo "trash: recovered " & target
 
 method execute*(trash: Trash): int =
   if trash.arguments.isSwitchEnabled("help", "h"):
@@ -176,9 +208,11 @@ method execute*(trash: Trash): int =
     dontShred = trash.arguments.isSwitchEnabled("dont-shred", "nS")
     shredPassesA = trash.arguments.getFlag("shred-passes")
     dontAsk = trash.arguments.isSwitchEnabled("no-confirm", "nC")
+    verbose = trash.arguments.isSwitchEnabled("verbose", "v")
 
-  var encryptionKey: string
-  var shredPasses: uint
+  var 
+    encryptionKey: string
+    shredPasses: uint
 
   if e1.len > 0:
     encryptionKey = e1
@@ -186,14 +220,23 @@ method execute*(trash: Trash): int =
     encryptionKey = e2
 
   if shredPassesA.len > 0:
+    for c in shredPassesA:
+      if c notin {'0'..'9'}:
+        trash.error("shred-passes must be an unsigned integer!")
+
     shredPasses = parseUInt(shredPassesA)
   else:
+    if verbose:
+      echo "trash: shred-passes not provided, defaulting to 8"
     shredPasses = 8'u
   
   discard existsOrCreateDir(getHomeDir() / TRASH_DIR)
 
   if doEmpty:
     if not noAudit:
+      if verbose:
+        echo "trash: will show audit"
+
       echo "trash: Press ENTER to show your audit."
       discard stdin.readLine()
       discard execShellCmd("ls --recursive " & getHomeDir() / TRASH_DIR & " | less")
@@ -202,13 +245,19 @@ method execute*(trash: Trash): int =
       let answer = stdin.readLine().toLowerAscii()
 
       if answer != "y":
-        echo "trash: Aborted."
+        echo "trash: aborted"
         quit(0)
+    else:
+      if verbose:
+        echo "trash: will not show audit."
 
     for _, f in walkDir(getHomeDir() / TRASH_DIR):
-      echo f
-      handle(trash, f, true, true, true, dontShred, dontAsk, "", shredPasses)
+      if verbose:
+        echo "trash: shredding " & f
+      handle(trash, f, true, true, true, dontShred, dontAsk, "", shredPasses, verbose)
     
+    echo "trash: Shredded everything in ~/.trash, the contents can no longer be recovered by trash."
+    discard shredPasses
     return 0
   
   if not recover:
@@ -221,11 +270,12 @@ method execute*(trash: Trash): int =
         dontShred,
         dontAsk,
         encryptionKey,
-        shredPasses
+        shredPasses,
+        verbose
       )
   else:
     for _, target in targets:
-      trash.recover(target)
+      trash.recover(target, verbose, encryptionKey)
   
   # Deallocate everything sensitive to prevent data leakage
   discard shredPasses
