@@ -17,7 +17,7 @@ proc handle*(mv: Mv, target, dest: string, verbose: bool = false) =
       echo "mv: cannot stat '" & x & "': No such file or directory"
       quit 1
 
-    if access(x, W_OK) != 0:
+    if fileExists(x) and access(x, W_OK) != 0:
       echo "mv: cannot mutate '" & x & "': Permission denied"
       quit 1
 
