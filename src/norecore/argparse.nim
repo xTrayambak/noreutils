@@ -1,9 +1,4 @@
-import std/[os, parseopt, strutils]
-
-const 
-  KEY_TERMINATORS = [
-    ':', '='
-  ]
+import std/[os, parseopt, sequtils, strutils]
 
 type
   ArgumentKind* = enum
@@ -57,6 +52,18 @@ proc getFlag*(args: seq[Argument], name: string): string =
         return arg.value
   
   ""
+
+proc getFlags*(args: seq[Argument]): seq[Argument] =
+  var flags: seq[Argument] = @[]
+
+  for arg in filter(
+    args, 
+    proc(arg: Argument): bool = 
+      arg.kind == akFlag
+  ):
+    flags.add(arg)
+
+  flags
 
 proc getTargets*(args: seq[Argument]): seq[string] =
   var targets: seq[string] = @[]
