@@ -9,6 +9,8 @@ Noreutils are just here for my personal use as a replacement for GNU coreutils. 
 `echo` - print input to the standard output
 `mv` - move files/directories
 `trash` - a safer alternative to `rm`, store files in ~/.trash, encrypt them optionally, recover them, and delete them when you want
+`json` - work with JSON in a painless manner
+`net` - send HTTP requests to web servers
 
 # installation
 To build the "bootstrap" binary, run:
