@@ -50,7 +50,9 @@ proc handle*(util: Json, target: string, operation: Operation) =
 
     for x in 1..targets.len-1:
       let t = targets[x]
-      echo parsed{t}
+      let data = parsed{t}
+
+      echo data.getStr()
 
   if operation == oSet:
     if (targets.len-1) mod 2 != 0:
