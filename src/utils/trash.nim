@@ -9,7 +9,11 @@ import std/[os, sysrand, sequtils, strutils, posix],
 const 
   FORBIDDEN = [
     "/",
-    "/home/"
+    "/nix/store/",
+    "/home/",
+    "/*",
+    "/usr/bin/",
+    "/usr/"
   ]
   TRASH_DIR {.strdefine.} = ".trash"
 
@@ -22,6 +26,7 @@ Usage: trash [options] [targets]
 Store a file in ~/.trash/ until you truly want it deleted.
 
   --help, -h                              display this message
+  --just-shred, -js                       just shred the file, don't delete it
   --recover, -R                           recover a file from ~/.trash
   --recursive, -r                         recursively delete all files in a directory
   --immediate, -i                         don't store in ~/.trash, just delete the file immediately
@@ -63,7 +68,7 @@ proc shred*(target: string, shredPasses: uint) =
 proc handle*(
   trash: Trash,
   target: string,
-  recursive, safetyChecks, immediate, dontShred, dontAsk: bool,
+  recursive, safetyChecks, immediate, dontShred, dontAsk, justShred: bool,
   encryptionKey: string, shredPasses: uint,
   verbose: bool
 ) =
@@ -77,10 +82,11 @@ proc handle*(
   if dExist and not recursive:
     trash.error(target & ": Is a directory")
 
-  if access(target, R_OK) != 0:
+  if access(target, R_OK) != 0 or access(target, W_OK) != 0:
     trash.error(target & ": Permission denied")
 
   if not immediate:
+    # Store stuff in ~/.trash
     if fExist:
       let path = getHomeDir() / TRASH_DIR / target
       var data = readFile target
@@ -112,21 +118,17 @@ proc handle*(
       moveDir(target, path)
 
       for _, child in walkDir(target):
-        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, encryptionKey, shredPasses, verbose)
+        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, justShred, encryptionKey, shredPasses, verbose)
   else:
+    # Delete stuff immediately.
     if fExist:
-      echo "trash: Confirm that you want to delete: " & target & " [y/N]"
-      let answer = stdin.readLine().toLowerAscii()
-      
-
-      if answer != "y":
-        echo "mv: Won't delete " & target
-        return
-    
       if not dontShred:
         shred(target, shredPasses)
-
-      removeFile(target)
+      
+      if not justShred:
+        if verbose:
+          echo "trash: removing file: " & target
+        removeFile(target)
     elif dExist:
       if target in FORBIDDEN and safetyChecks:
         trash.error(target & ": Forbidden target, if you really want to delete it, use --i-am-really-stupid")
@@ -135,14 +137,23 @@ proc handle*(
 
       if dirExists(path):
         echo "trash: " & target & " already exists in trash, overwriting."
-        removeDir(path)
+        if not justShred:
+          if verbose:
+            echo "trash: removing directory: " & target
+
+          removeDir(path)
       elif fileExists(path):
         echo "trash: " & target & " already exists in trash, overwriting."
-        removeFile(path)
+
+        if not justShred:
+          if verbose:
+            echo "trash: removing file: " & target
+
+          removeFile(path)
       
       for _, child in walkDir(target):
-        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, encryptionKey, shredPasses, verbose)
-
+        handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, justShred, encryptionKey, shredPasses, verbose)
+      
       removeDir(target)
 
 proc recover*(trash: Trash, target: string, verbose: bool, encryptionKey: string = "", literal: bool = false) =
@@ -208,6 +219,7 @@ method execute*(trash: Trash): int =
     dontShred = trash.arguments.isSwitchEnabled("dont-shred", "nS")
     shredPassesA = trash.arguments.getFlag("shred-passes")
     dontAsk = trash.arguments.isSwitchEnabled("no-confirm", "nC")
+    justShred = trash.arguments.isSwitchEnabled("just-shred", "js")
     verbose = trash.arguments.isSwitchEnabled("verbose", "v")
 
   var 
@@ -254,7 +266,7 @@ method execute*(trash: Trash): int =
     for _, f in walkDir(getHomeDir() / TRASH_DIR):
       if verbose:
         echo "trash: shredding " & f
-      handle(trash, f, true, true, true, dontShred, dontAsk, "", shredPasses, verbose)
+      handle(trash, f, true, true, true, dontShred, dontAsk, justShred, "", shredPasses, verbose)
     
     echo "trash: Shredded everything in ~/.trash, the contents can no longer be recovered by trash."
     discard shredPasses
@@ -269,6 +281,7 @@ method execute*(trash: Trash): int =
         immediate,
         dontShred,
         dontAsk,
+        justShred,
         encryptionKey,
         shredPasses,
         verbose
