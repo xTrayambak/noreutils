@@ -12,14 +12,14 @@ type
   Mv* = ref object of Coreutil
 
 proc handle*(mv: Mv, target, dest: string, verbose: bool = false) =
-  for x in [target, dest]:
-    if not fileExists(x) and not dirExists(x):
-      echo "mv: cannot stat '" & x & "': No such file or directory"
-      quit 1
+  if not fileExists(target) and not dirExists(target):
+    mv.error("cannot stat '" & target & "': No such file or directory")
 
-    if fileExists(x) and access(x, W_OK) != 0:
-      echo "mv: cannot mutate '" & x & "': Permission denied"
-      quit 1
+  if access(target, R_OK) != 0:
+    mv.error("cannot move '" & dest & "': Permission denied")
+
+  if fileExists(dest) and access(dest, W_OK) != 0:
+    mv.error("cannot mutate '" & dest & "': Permission denied")
 
   var tKind, dKind: MvKind
     
