@@ -1,10 +1,5 @@
-# do-not-compile
-
-import std/[terminal],
-       ../norecore/[
-          argparse,
-          coreutil
-        ]
+import std/terminal,
+       ../norecore/coreutil
 
 type Clear* = ref object of Coreutil
 
@@ -14,18 +9,6 @@ method execute*(clear: Clear): int =
   0
 
 when isMainModule:
-  let clear = Clear(
-    name: "clear",
-    authors: @[
-      Author(
-        firstName: "Trayambak",
-        middleName: "Mentally Insane",
-        lastName: "Rai",
-
-        middleNameInQuotations: true
-      )
-    ],
-    arguments: parseArguments()
-  )
+  let clear = Clear()
 
   clear.run()
