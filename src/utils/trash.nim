@@ -1,9 +1,10 @@
-import std/[os, sysrand, sequtils, strutils, posix],
+import std/[os, times, tables, sysrand, sequtils, strutils, posix, json],
        ../norecore/[
           argparse,
           coreutil,
           bytes
         ],
+        jsony,
         nimAesCrypt
 
 const 
@@ -16,6 +17,7 @@ const
     "/usr/"
   ]
   TRASH_DIR {.strdefine.} = ".trash"
+  TRASH_REGISTER {.strdefine.} = ".trash-internal" / "register.json"
 
 type
   Trash* = ref object of Coreutil
@@ -27,6 +29,7 @@ Store a file in ~/.trash/ until you truly want it deleted.
 
   --help, -h                              display this message
   --just-shred, -js                       just shred the file, don't delete it
+  --dump-registry, -dr                    dump everything in the trash registry
   --recover, -R                           recover a file from ~/.trash
   --recursive, -r                         recursively delete all files in a directory
   --immediate, -i                         don't store in ~/.trash, just delete the file immediately
@@ -84,6 +87,16 @@ proc handle*(
 
   if access(target, R_OK) != 0 or access(target, W_OK) != 0:
     trash.error(target & ": Permission denied")
+  
+  # We have to read the data in advance or everything turns to scheisse.
+  let data = readFile(getHomeDir() / TRASH_REGISTER)
+  let file = open(getHomeDir() / TRASH_REGISTER, fmWrite)
+  defer: file.close()
+
+  echo data
+  
+  var rData = data
+    .fromJson(TableRef[string, Table[string, string]])
 
   if not immediate:
     # Store stuff in ~/.trash
@@ -94,6 +107,19 @@ proc handle*(
       if fileExists(path) or dirExists(path):
         echo "trash: " & target & " already exists in trash, overwriting."
       
+      let splitted = path.splitFile()
+      
+      # Weweee
+      if not dirExists(splitted.dir):
+        var prev: string = "/"
+        for d in splitted.dir.split('/'):
+          if not dirExists(prev / d):
+            createDir(prev / d)
+          
+          prev = prev / d
+
+        echo prev
+
       writeFile(path, data)
 
       if encryptionKey.len > 0:
@@ -102,6 +128,14 @@ proc handle*(
         encryptFile(path, path, encryptionKey, 512)
 
       removeFile(target)
+
+      rData[target] = {
+        "kind": "f",
+        "path": path,
+        "deleted_on": $now(),
+        "encrypted": $(encryptionKey.len > 0),
+        "belongs_to": absolutePath target
+      }.toTable
     elif dExist:
       if target in FORBIDDEN and safetyChecks:
         trash.error(target & ": Forbidden target, if you really want to delete it, use --i-am-really-stupid")
@@ -119,6 +153,14 @@ proc handle*(
 
       for _, child in walkDir(target):
         handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, justShred, encryptionKey, shredPasses, verbose)
+      
+      rData[target] = {
+        "kind": "d",
+        "path": path,
+        "deleted_on": $now(),
+        "encrypted": "false", # How do ya encrypt a directory? kekw,
+        "belongs_to": absolutePath target
+      }.toTable
   else:
     # Delete stuff immediately.
     if fExist:
@@ -155,8 +197,18 @@ proc handle*(
         handle(trash, child, recursive, safetyChecks, immediate, dontShred, dontAsk, justShred, encryptionKey, shredPasses, verbose)
       
       removeDir(target)
+  
+  file.write(rData.toJson())
 
 proc recover*(trash: Trash, target: string, verbose: bool, encryptionKey: string = "", literal: bool = false) =
+  let data = readFile(getHomeDir() / TRASH_REGISTER)
+  let registry = open(getHomeDir() / TRASH_REGISTER, fmWrite)
+  var rData = data
+    .fromJson(TableRef[string, Table[string, string]])
+
+  if target notin rData:
+    trash.error(target & ": No such file or directory in trash records")
+
   var path: string
   
   if not literal:
@@ -169,21 +221,17 @@ proc recover*(trash: Trash, target: string, verbose: bool, encryptionKey: string
     dExists = dirExists path
 
   if not fExists and not dExists:
-    trash.error(target & ": No such file or directory in trash records")
+    trash.error(target & ": No such file or directory in trash directory")
 
   if fExists:
     if encryptionKey.len < 1:
-      moveFile(path, target)
+      moveFile(path, rData[target]["belongs_to"])
     else:
-      decryptFile(path, target, encryptionKey, 512)
+      decryptFile(path, rData[target]["belongs_to"], encryptionKey, 512)
     
-    let contents = readFile(target)
-    if contents.startsWith("AES"):
-      # TODO: this is a bad way to detect an encrypted file.
-     echo("trash: It seems that this file is encrypted and you forgot to provide an encryption key. If you want, you can provide one right now: ")
+    if rData[target]["encrypted"].parseBool():
+     echo "trash: It seems that this file is encrypted and you forgot to provide an encryption key. If you want, you can provide one right now: "
      decryptFile(path, target, stdin.readLine(), 512)
-
-    discard contents 
   elif dExists:
     if dirExists target:
       removeDir(target)
@@ -196,10 +244,50 @@ proc recover*(trash: Trash, target: string, verbose: bool, encryptionKey: string
       trash.recover(path / k.splitPath().tail, verbose, encryptionKey, true)
 
     removeDir(path)
-
+  
+  rData.del(target)
   echo "trash: recovered " & target
+  writeFile(getHomeDir() / TRASH_REGISTER, rData.toJson())
+
+proc dumpRegister*(trash: Trash) =
+  let file = open(getHomeDir() / TRASH_REGISTER, fmRead)
+  defer: file.close()
+
+  let data = file
+    .readAll()
+    .fromJson()
+
+  echo data.pretty()
 
 method execute*(trash: Trash): int =
+  let exists = fileExists(getHomeDir() / TRASH_REGISTER)
+  discard existsOrCreateDir(getHomeDir() / TRASH_REGISTER.splitFile().dir)
+
+  if not exists:
+    writeFile(getHomeDir() / TRASH_REGISTER, """
+{
+  "": {
+    "kind": "NONE",
+    "path": "/",
+    "encrypted": "true",
+    "deleted_on": "1984-6-05T12:40:29+5:30",
+    "belongs_to": ""
+  }
+}
+    """)
+  else:
+    if readFile(getHomeDir() / TRASH_REGISTER).isEmptyOrWhitespace():
+      writeFile(getHomeDir() / TRASH_REGISTER, """
+{
+  "": {
+    "kind": "NONE",
+    "path": "/",
+    "encrypted": "true",
+    "deleted_on": "1984-6-05T12:40:29+5:30",
+    "belongs_to": ""
+  }
+}
+      """)
   if trash.arguments.isSwitchEnabled("help", "h"):
     trash.showHelp()
 
@@ -221,22 +309,28 @@ method execute*(trash: Trash): int =
     dontAsk = trash.arguments.isSwitchEnabled("no-confirm", "nC")
     justShred = trash.arguments.isSwitchEnabled("just-shred", "js")
     verbose = trash.arguments.isSwitchEnabled("verbose", "v")
+    dumpRegister = trash.arguments.isSwitchEnabled("dump-register", "dr")
 
-  var 
+  var
     encryptionKey: string
     shredPasses: uint
 
+  if dumpRegister:
+    trash.dumpRegister()
+
   if e1.len > 0:
-    encryptionKey = e1
+    var data = e1
+    encryptionKey = data
   elif e2.len > 0:
-    encryptionKey = e2
+    var data = e2
+    encryptionKey = data
 
   if shredPassesA.len > 0:
     for c in shredPassesA:
       if c notin {'0'..'9'}:
         trash.error("shred-passes must be an unsigned integer!")
 
-    shredPasses = parseUInt(shredPassesA)
+    shredPasses = parseUint(shredPassesA)
   else:
     if verbose:
       echo "trash: shred-passes not provided, defaulting to 8"
@@ -269,7 +363,6 @@ method execute*(trash: Trash): int =
       handle(trash, f, true, true, true, dontShred, dontAsk, justShred, "", shredPasses, verbose)
     
     echo "trash: Shredded everything in ~/.trash, the contents can no longer be recovered by trash."
-    discard shredPasses
     return 0
   
   if not recover:
@@ -289,8 +382,7 @@ method execute*(trash: Trash): int =
   else:
     for _, target in targets:
       trash.recover(target, verbose, encryptionKey)
-  
-  # Deallocate everything sensitive to prevent data leakage
+
   discard shredPasses
   discard encryptionKey
   discard e1
