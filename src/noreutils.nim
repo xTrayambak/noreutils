@@ -5,18 +5,32 @@ discard existsOrCreateDir("bin/")
 proc compileAll =
   when not defined(release):
     for file in walkFiles("src/utils/*.nim"):
-      if readFile(file).splitLines()[0] == "# do-not-compile": continue
+      let contents = readFile(file)
+      let lines = contents.splitLines()
+      if lines[0] == "# do-not-compile": 
+        continue
+
+      var cmd = lines[0]
+      cmd.removePrefix('#')
+
       echo "=> " & file
-      let res = execCmdEx("nim c -o:bin/ " & file)
+      let res = execCmdEx("nim c " & cmd & " -o:bin/ " & file)
       if res.exitCode != 0:
         echo "=> BUILD FAILED."
 
       echo res.output
   else:
     for file in walkFiles("src/utils/*.nim"):
-      if readFile(file).splitLines()[0] == "# do-not-compile": continue
-      echo "=> " & file
-      let res = execCmdEx("nim c -d:release -o:bin/ " & file)
+      let contents = readFile(file)
+      let lines = contents.splitLines()
+      if lines[0] == "# do-not-compile": 
+        continue
+
+      var cmd = lines[0]
+      cmd.removePrefix('#')
+
+      echo "=> " & file & " (" & cmd & ")"
+      let res = execCmdEx("nim c -d:release " & cmd & " -o:bin/ " & file)
       if res.exitCode != 0:
         echo "=> BUILD FAILED."
 
