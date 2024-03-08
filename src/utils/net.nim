@@ -1,3 +1,5 @@
+# -d:ssl
+
 import std/[strutils, httpclient, os, posix],
        ../norecore/[
           argparse,
