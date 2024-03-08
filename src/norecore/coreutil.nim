@@ -1,5 +1,7 @@
 import argparse
 
+from std/posix import setLocale, LC_ALL
+
 type 
   Author* = ref object of RootObj
     firstName*: string
@@ -12,8 +14,9 @@ type
     authors*: seq[Author]
     arguments*: seq[Argument]
 
-method showHelp*(coreutil: Coreutil) {.base.} =
+method showHelp*(coreutil: Coreutil) {.base, noReturn.} =
   echo "no help 4 u"
+  quit 1
 
 method error*(coreutil: Coreutil, msg: string, exitCode: int = 1) {.noReturn base inline.} =
   echo coreutil.name & ": " & msg
@@ -37,5 +40,8 @@ proc showCredits*(coreutil: Coreutil) =
 method execute*(coreutil: Coreutil): int {.base.} =
   0
 
-proc run*(coreutil: Coreutil) =
+proc setup*(coreutil: Coreutil) {.inline.} =
+  discard setLocale(LC_ALL, "")
+
+proc run*(coreutil: Coreutil) {.inline.} =
   quit coreutil.execute()
