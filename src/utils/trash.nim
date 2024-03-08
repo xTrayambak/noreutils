@@ -1,4 +1,6 @@
-import std/[os, times, tables, sysrand, sequtils, strutils, posix, json],
+#
+
+import std/[os, times, tables, sysrand, strutils, posix, json],
        ../norecore/[
           argparse,
           coreutil,
@@ -28,17 +30,17 @@ Usage: trash [options] [targets]
 Store a file in ~/.trash/ until you truly want it deleted.
 
   --help, -h                              display this message
-  --just-shred, -js                       just shred the file, don't delete it
-  --dump-registry, -dr                    dump everything in the trash registry
+  --just-shred, -S                        just shred the file, don't delete it
+  --dump-register, -d                     dump everything in the trash register
   --recover, -R                           recover a file from ~/.trash
   --recursive, -r                         recursively delete all files in a directory
   --immediate, -i                         don't store in ~/.trash, just delete the file immediately
-  --i-am-really-stupid, -iars             disable checks that prevent deleting system files
+  --i-am-really-stupid, -S                disable checks that prevent deleting system files
   --empty, -E                             truly destroy all files forever in trash
   --encrypt, -e                           encrypt the files being stored in ~/.trash using AES256
-  --no-audit, -nA                         don't display an audit of files about to be deleted
-  --dont-shred, -nS                       don't shred data, just tell the filesystem to remove it, the data will be recoverable very easily
-  --shred-passes, -s                      the amount of times a file will be filled with random data before being deleted, more passes means it will be harder to recover the file (default=8)
+  --no-audit, -A                          don't display an audit of files about to be deleted
+  --dont-shred, -D                        don't shred data, just tell the filesystem to remove it, the data will be recoverable very easily
+  --shred-passes                          the amount of times a file will be filled with random data before being deleted, more passes means it will be harder to recover the file (default=40)
 
 Examples:
   trash --immediate the-cure-to-cancer.pdf                Use this when the CIA finds you
@@ -46,6 +48,7 @@ Examples:
 
 Noreutils doesn't have docs. Git gud. :)
 """
+  quit 0
 
 proc shred*(target: string, shredPasses: uint) =
   let dataLen: int = readFile(target).len
@@ -298,18 +301,18 @@ method execute*(trash: Trash): int =
     targets = trash.arguments.getTargets()
     recursive = trash.arguments.isSwitchEnabled("recursive", "r")
     recover = trash.arguments.isSwitchEnabled("recover", "R")
-    safetyChecks = not trash.arguments.isSwitchEnabled("i-am-really-stupid", "iars")
+    safetyChecks = not trash.arguments.isSwitchEnabled("i-am-really-stupid", "S")
     doEmpty = trash.arguments.isSwitchEnabled("empty", "E")
     e1 = trash.arguments.getFlag("encrypt")
     immediate = trash.arguments.isSwitchEnabled("immediate", "i")
     e2 = trash.arguments.getFlag("e")
-    noAudit = trash.arguments.isSwitchEnabled("no-audit", "nA")
-    dontShred = trash.arguments.isSwitchEnabled("dont-shred", "nS")
+    noAudit = trash.arguments.isSwitchEnabled("no-audit", "A")
+    dontShred = trash.arguments.isSwitchEnabled("dont-shred", "D")
     shredPassesA = trash.arguments.getFlag("shred-passes")
-    dontAsk = trash.arguments.isSwitchEnabled("no-confirm", "nC")
-    justShred = trash.arguments.isSwitchEnabled("just-shred", "js")
+    dontAsk = trash.arguments.isSwitchEnabled("no-confirm", "y")
+    justShred = trash.arguments.isSwitchEnabled("just-shred", "S")
     verbose = trash.arguments.isSwitchEnabled("verbose", "v")
-    dumpRegister = trash.arguments.isSwitchEnabled("dump-register", "dr")
+    dumpRegister = trash.arguments.isSwitchEnabled("dump-register", "d")
 
   var
     encryptionKey: string
@@ -333,8 +336,8 @@ method execute*(trash: Trash): int =
     shredPasses = parseUint(shredPassesA)
   else:
     if verbose:
-      echo "trash: shred-passes not provided, defaulting to 8"
-    shredPasses = 8'u
+      echo "trash: shred-passes not provided, defaulting to 40"
+    shredPasses = 40'u
   
   discard existsOrCreateDir(getHomeDir() / TRASH_DIR)
 
@@ -383,10 +386,6 @@ method execute*(trash: Trash): int =
     for _, target in targets:
       trash.recover(target, verbose, encryptionKey)
 
-  discard shredPasses
-  discard encryptionKey
-  discard e1
-  discard e2
   0
 
 when isMainModule:
