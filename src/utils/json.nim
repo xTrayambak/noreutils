@@ -1,3 +1,5 @@
+#
+
 import std/[strutils, json, posix, os],
        jsony,
        ../norecore/[
@@ -36,9 +38,9 @@ proc handle*(util: Json, target: string, operation: Operation) =
   var parsed: JsonNode
 
   if not fileExists(target):
-    parsed = parseJson(target)
+    parsed = target.fromJson()
   else:
-    parsed = parseFile(target)
+    parsed = readFile(target).fromJson()
   
   if operation == oPrettify:
     echo parsed.pretty()
